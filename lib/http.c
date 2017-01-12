@@ -272,7 +272,7 @@ static size_t curl_read(void *buffer, size_t size, size_t nmemb, struct _stream_
   return data->cb(buffer, size * nmemb, data->user_data);
 }
 
-GString* http_post_stream_upload(http* h, const gchar* url, goffset len, http_data_fn read_cb, gpointer user_data, GError** err)
+GString* http_post_stream_upload(http* h, const gchar* url, goffset len, http_data_fn read_cb, gpointer user_data, GError** err, goffset resume_from)
 {
   struct curl_slist* headers = NULL;
   glong http_status = 0;
@@ -283,12 +283,17 @@ GString* http_post_stream_upload(http* h, const gchar* url, goffset len, http_da
   g_return_val_if_fail(h != NULL, NULL);
   g_return_val_if_fail(url != NULL, NULL);
   g_return_val_if_fail(err == NULL || *err == NULL, NULL);
+  g_return_val_if_fail(len > 0, FALSE);
+  g_return_val_if_fail(resume_from >= 0, FALSE);
 
   http_no_expect(h);
 
   // setup post headers and url
   curl_easy_setopt(h->curl, CURLOPT_POST, 1L);
   curl_easy_setopt(h->curl, CURLOPT_URL, url);
+
+  // resume upload of partial file
+  curl_easy_setopt(h->curl, CURLOPT_RESUME_FROM_LARGE, resume_from);
 
   // setup request post body writer
   http_set_content_length(h, len);

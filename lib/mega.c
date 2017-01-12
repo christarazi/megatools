@@ -3054,6 +3054,9 @@ mega_node* mega_session_put(mega_session* s, const gchar* remote_path, const gch
   gc_free gchar* file_name = NULL;
   gc_object_unref GFileInputStream* stream = NULL;
   gc_byte_array_unref GByteArray* buffer = NULL;
+  gc_object_unref GFile *file = NULL;
+  gboolean partial_file = FALSE;
+  goffset resume_from = 0;
 
   g_return_val_if_fail(s != NULL, NULL);
   g_return_val_if_fail(remote_path != NULL, NULL);
@@ -3069,8 +3072,16 @@ mega_node* mega_session_put(mega_session* s, const gchar* remote_path, const gch
   {
     if (node->type == MEGA_NODE_FILE)
     {
-      g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", remote_path);
-      return NULL;
+      file = g_file_new_for_path(local_path);
+      partial_file = get_partial_file_offset(file, &resume_from);
+      printf("partial_file: %d\n", partial_file);
+      printf("resume_from: %ld bytes\n", resume_from);
+      printf("node file size: %ld bytes\n", node->size);
+      if (node->size >= resume_from)
+      {
+        g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", remote_path);
+        return NULL;
+      }
     }
     else
     {
@@ -3124,13 +3135,15 @@ mega_node* mega_session_put(mega_session* s, const gchar* remote_path, const gch
 
   // open local file for reading, and get file size
 
-  gc_object_unref GFile* file = g_file_new_for_path(local_path);
+  if (!file)
+    file = g_file_new_for_path(local_path);
+
   data.stream = stream = g_file_read(file, NULL, &local_err);
   if (!stream)
   {
     g_propagate_prefixed_error(err, local_err, "Can't read local file %s: ", local_path);
     return NULL;
-  }   
+  }
 
   gc_object_unref GFileInfo* info = g_file_input_stream_query_info(stream, G_FILE_ATTRIBUTE_STANDARD_SIZE, NULL, &local_err);
   if (!info)
@@ -3140,6 +3153,11 @@ mega_node* mega_session_put(mega_session* s, const gchar* remote_path, const gch
   }
 
   goffset file_size = g_file_info_get_size(info);
+
+  // actual file size (|resume_from|) is on local system
+  // partial file size (|node->size|) is on remote system
+  if (partial_file)
+    file_size = resume_from - node->size;
 
   // ask for upload url - [{"a":"u","ssl":0,"ms":0,"s":<SIZE>,"r":0,"e":0}]
   gc_free gchar* up_node = api_call(s, 'o', NULL, &local_err, "[{a:u, ssl:0, ms:0, s:%i, r:0, e:0}]", (gint64)file_size);
@@ -3161,13 +3179,17 @@ mega_node* mega_session_put(mega_session* s, const gchar* remote_path, const gch
   // setup buffer
   data.buffer = buffer = g_byte_array_new();
 
+  // initialize cbc-mac state to resume partial upload
+  if (partial_file)
+    put_process_data(data.buffer, file_size, &data);
+
   // perform upload
   gc_http_free http* h = http_new();
   http_set_content_type(h, "application/octet-stream");
   http_set_progress_callback(h, (http_progress_fn)progress_generic, s);
   http_set_speed(h, s->max_ul, s->max_dl);
   http_set_proxy(h, s->proxy);
-  gc_string_free GString* up_handle = http_post_stream_upload(h, p_url, file_size, (http_data_fn)put_process_data, &data, &local_err);
+  gc_string_free GString* up_handle = http_post_stream_upload(h, p_url, file_size, (http_data_fn)put_process_data, &data, &local_err, resume_from);
 
   if (!up_handle)
   {

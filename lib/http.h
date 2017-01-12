@@ -51,7 +51,7 @@ void http_set_speed(http* h, gint max_ul, gint max_dl);
 void http_set_proxy(http* h, const gchar* proxy);
 
 GString* http_post(http* h, const gchar* url, const gchar* body, gssize body_len, GError** err);
-GString* http_post_stream_upload(http* h, const gchar* url, goffset len, http_data_fn read_cb, gpointer user_data, GError** err);
+GString* http_post_stream_upload(http* h, const gchar* url, goffset len, http_data_fn read_cb, gpointer user_data, GError** err, goffset resume_from);
 gboolean http_post_stream_download(http* h, const gchar* url, http_data_fn write_cb, gpointer user_data, GError** err, gint64 file_size, goffset resume_from);
 
 void http_free(http* h);
