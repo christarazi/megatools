@@ -3245,6 +3245,7 @@ struct _get_data
 {
   mega_session* s;
   GFileOutputStream* stream;
+  GFileInputStream* partial_stream;
   AES_KEY k;
   guchar iv[AES_BLOCK_SIZE];
   gint num;
@@ -3280,6 +3281,55 @@ static gsize get_process_data(gpointer buffer, gsize size, struct _get_data* dat
   }
 
   return size;
+}
+
+// megaget; verifies partially downloaded file
+static gboolean partial_get_verify_data(gsize size, struct _get_data* data, GError** err)
+{
+  gc_byte_array_unref GByteArray* buffer = g_byte_array_new();
+  gc_error_free GError* local_err = NULL;
+  gsize bytes_read = 0;
+  gsize total_read = 0;
+  gsize CHUNK_SIZE = 16 * 1024;
+  goffset offset = 0;
+
+  g_debug("%s", "verifying partial file");
+
+  if (!(data->buffer))
+    data->buffer = g_byte_array_new();
+
+  if (size > data->buffer->len)
+  {
+    g_byte_array_set_size(buffer, size);
+    g_byte_array_set_size(data->buffer, size);
+  }
+
+  while (total_read < size)
+  {
+    if (!g_input_stream_read_all(G_INPUT_STREAM(data->partial_stream), buffer->data, CHUNK_SIZE, &bytes_read, NULL, &local_err))
+    {
+      g_printerr("ERROR: Failed reading from stream: %s\n", local_err->message);
+      return FALSE;
+    }
+
+    if (bytes_read > 0)
+    {
+      AES_ctr128_encrypt(buffer->data, data->buffer->data, bytes_read, &data->k, data->iv, data->ecount, &data->num);
+      chunked_cbc_mac_update(&data->mac, buffer->data, bytes_read);
+    }
+
+    total_read += bytes_read;
+  }
+
+  if (!g_input_stream_close(G_INPUT_STREAM(data->partial_stream), NULL, &local_err))
+  {
+      g_propagate_prefixed_error(err, local_err, "Can't close partial file");
+      return FALSE;
+  }
+
+  g_info("%s", "partial file verified");
+
+  return TRUE;
 }
 
 gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar* remote_path, GError** err)
@@ -3325,26 +3375,30 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
     {
       if (g_file_query_file_type(file, 0, NULL) == G_FILE_TYPE_DIRECTORY)
       {
-        gc_object_unref GFile* child = g_file_get_child(file, n->name);
+        GFile *child = g_file_get_child(file, n->name);
+
         if (g_file_query_exists(child, NULL))
-        {
-          g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "Local file already exists: %s/%s", local_path, n->name);
-          return FALSE;
-        }
+          partial_file = get_partial_file_offset(child, &resume_from);
         else
         {
-          file = child;
-          child = NULL;
+          printf("child does not exist");
+          partial_file = FALSE;
         }
+
+        file = child;
       }
       else
       {
-        g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "Local file already exists: %s", local_path);
-        return FALSE;
+        partial_file = get_partial_file_offset(file, &resume_from);
       }
     }
 
-    data.stream = stream = g_file_create(file, 0, NULL, &local_err);
+    // append to partial file, otherwise create new file
+    if (partial_file)
+      data.stream = stream = g_file_append_to(file, 0, NULL, &local_err);
+    else
+      data.stream = stream = g_file_create(file, 0, NULL, &local_err);
+
     if (!data.stream)
     {
       g_propagate_prefixed_error(err, local_err, "Can't open local file %s for writing: ", local_path);
@@ -3382,8 +3436,35 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
     goto err;
   }
 
-  // setup buffer
-  data.buffer = buffer = g_byte_array_new();
+  // sanity check partial download conditions
+  if (resume_from == file_size)
+  {
+    g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", g_file_get_path(file));
+    return FALSE;
+  }
+  else if (resume_from > file_size)
+  {
+    g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "Potential overwrite; file detected with same name");
+    return FALSE;
+  }
+
+  // verify partial file before downloading
+  data.partial_stream = g_file_read(file, NULL, &local_err);
+  if (!data.partial_stream)
+  {
+    g_propagate_prefixed_error(err, local_err, "Can't read partial file for verifying: %s: ", local_path);
+    return FALSE;
+  }
+
+  // setup buffer if not already
+  if (!data.buffer)
+    data.buffer = buffer = g_byte_array_new();
+
+  if (partial_file && !partial_get_verify_data(resume_from, &data, err))
+  {
+    g_propagate_prefixed_error(err, local_err, "Failed to verify partial file");
+    return FALSE;
+  }
 
   // perform download
   h = http_new();
