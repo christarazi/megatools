@@ -3758,7 +3758,7 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
     if (partial_file)
     {
       // open file for appending to it
-      data.stream = stream = g_file_append_to(file, resume_from, NULL, &local_err);
+      data.stream = stream = g_file_append_to(file, 0, NULL, &local_err);
       g_debug("%s", "appending to partial file");
     }
     else
