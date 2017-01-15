@@ -381,7 +381,7 @@ again:
   return res;
 }
 
-gboolean http_post_stream_download(http* h, const gchar* url, http_data_fn write_cb, gpointer user_data, GError** err, gint64 file_size, goffset resume_from)
+gboolean http_get_stream_download(http* h, const gchar* url, http_data_fn write_cb, gpointer user_data, GError** err, gint64 file_size, goffset resume_from)
 {
   struct curl_slist* headers = NULL;
   glong http_status = 0;

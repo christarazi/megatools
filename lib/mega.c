@@ -1625,9 +1625,16 @@ static gchar* path_simplify(const gchar* path)
 
 // {{{
 
-static gboolean get_partial_file_offset(GFile* file, goffset* resume_from)
+static gboolean get_partial_file_offset(GFile* file, goffset* resume_from, GError** err)
 {
-  gc_object_unref GFileInfo* info = g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_SIZE, G_FILE_QUERY_INFO_NONE, NULL, NULL);
+  gc_object_unref GFileInfo* info = g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_SIZE, G_FILE_QUERY_INFO_NONE, NULL, err);
+
+  if (!info)
+  {
+    *resume_from = -1;
+    g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "Can't query file info");
+    return FALSE;
+  }
 
   *resume_from = g_file_info_get_size(info);
   if (*resume_from == 0)
@@ -3400,18 +3407,21 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
         GFile *child = g_file_get_child(file, n->name);
 
         if (g_file_query_exists(child, NULL))
-          partial_file = get_partial_file_offset(child, &resume_from);
-        else
         {
-          printf("child does not exist");
-          partial_file = FALSE;
+          partial_file = get_partial_file_offset(child, &resume_from, err);
+          if (resume_from == -1)
+            goto err;
         }
+        else
+          partial_file = FALSE;
 
         file = child;
       }
       else
       {
-        partial_file = get_partial_file_offset(file, &resume_from);
+        partial_file = get_partial_file_offset(file, &resume_from, err);
+        if (resume_from == -1)
+          goto err;
       }
     }
 
@@ -3493,7 +3503,7 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
   http_set_progress_callback(h, (http_progress_fn)progress_generic, s);
   http_set_speed(h, s->max_ul, s->max_dl);
   http_set_proxy(h, s->proxy);
-  if (!http_post_stream_download(h, url, (http_data_fn)get_process_data, &data, &local_err, file_size, resume_from))
+  if (!http_get_stream_download(h, url, (http_data_fn)get_process_data, &data, &local_err, file_size, resume_from))
   {
     g_propagate_prefixed_error(err, local_err, "Data download failed: ");
     goto err;
@@ -3653,7 +3663,9 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
 
       if (file_type != G_FILE_TYPE_DIRECTORY)
       {
-        partial_file = get_partial_file_offset(file, &resume_from);
+        partial_file = get_partial_file_offset(file, &resume_from, err);
+        if (resume_from == -1)
+          goto err;
       }
       else
       {
@@ -3759,13 +3771,15 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
       file = g_file_get_child(parent_dir, node_name);
 
       // check if file is partially downloaded
-      partial_file = get_partial_file_offset(file, &resume_from);
+      partial_file = get_partial_file_offset(file, &resume_from, err);
+      if (resume_from == -1)
+        goto err;
     }
 
     // sanity check partial download conditions
     if (resume_from == file_size)
     {
-      g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", local_path);
+      g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", g_file_get_path(file));
       return FALSE;
     }
     else if (resume_from > file_size)
@@ -3828,7 +3842,7 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
   http_set_progress_callback(h, (http_progress_fn)progress_generic, s);
   http_set_speed(h, s->max_ul, s->max_dl);
   http_set_proxy(h, s->proxy);
-  if (!http_post_stream_download(h, url, (http_data_fn)dl_process_data, &data, &local_err, file_size, resume_from))
+  if (!http_get_stream_download(h, url, (http_data_fn)dl_process_data, &data, &local_err, file_size, resume_from))
   {
     g_propagate_prefixed_error(err, local_err, "Data download failed: ");
     goto err;
