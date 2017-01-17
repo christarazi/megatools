@@ -279,6 +279,7 @@ GString* http_post_stream_upload(http* h, const gchar* url, goffset len, http_da
   GString* response;
   CURLcode res;
   struct _stream_data data;
+  goffset total_size = len;
 
   g_return_val_if_fail(h != NULL, NULL);
   g_return_val_if_fail(url != NULL, NULL);
@@ -293,11 +294,15 @@ GString* http_post_stream_upload(http* h, const gchar* url, goffset len, http_da
   curl_easy_setopt(h->curl, CURLOPT_URL, url);
 
   // resume upload of partial file
-  curl_easy_setopt(h->curl, CURLOPT_RESUME_FROM_LARGE, resume_from);
+  if (len <= resume_from)
+  {
+    curl_easy_setopt(h->curl, CURLOPT_RESUME_FROM_LARGE, resume_from);
+    total_size = len + resume_from;
+  }
 
   // setup request post body writer
   http_set_content_length(h, len);
-  curl_easy_setopt(h->curl, CURLOPT_POSTFIELDSIZE_LARGE, len);
+  curl_easy_setopt(h->curl, CURLOPT_POSTFIELDSIZE_LARGE, total_size);
 
   data.cb = read_cb;
   data.user_data = user_data;

@@ -959,7 +959,28 @@ static gsize get_chunk_off(gint idx)
 }
 */
 
-typedef struct 
+// get chunk boundaries of a file based on |size|
+// return |arr| containing chunk boundaries
+static void get_chunk_boundaries(GArray* arr, gsize size)
+{
+  gint i;
+  gsize start = 0;
+  g_array_append_val(arr, start);
+
+  for (i = 1; i <= 8 && (start < (size - (i * 131072))); i++)
+  {
+    start += i * 131072;
+    g_array_append_val(arr, start);
+  }
+
+  while ((start + 1048576) < size)
+  {
+    start += 1048576;
+    g_array_append_val(arr, start);
+  }
+}
+
+typedef struct
 {
   AES_KEY k;
   gsize chunk_idx;
@@ -1644,6 +1665,34 @@ static gboolean get_partial_file_offset(GFile* file, goffset* resume_from, GErro
     g_info("partial file detected, size: %lu bytes", *resume_from);
     return TRUE;
   }
+}
+
+static GFile* get_partial_temp_file(GFile* local_file)
+{
+  gchar* path = g_file_get_path(local_file);
+
+  gc_string_free GString* full_path = g_string_new(path);
+  full_path = g_string_append(full_path, ".tmp");
+
+  GFile* file = g_file_new_for_path(full_path->str);
+
+  return file;
+}
+
+static void read_partial_temp_file(GFile* file, guchar* aes_key, guchar* nonce)
+{
+  gc_object_unref GFileInputStream* gfis = g_file_read(file, NULL, NULL);
+  if (!gfis)
+  {
+    // TODO: better error
+    printf("error reading in read_partial_temp_file()\n");
+    return;
+  }
+
+  g_input_stream_read(G_INPUT_STREAM(gfis), aes_key, 128, NULL, NULL);
+  g_input_stream_read(G_INPUT_STREAM(gfis), nonce, 8, NULL, NULL);
+  g_input_stream_close(G_INPUT_STREAM(gfis), NULL, NULL);
+  return;
 }
 
 // }}}
@@ -3077,13 +3126,16 @@ mega_node* mega_session_put(mega_session* s, const gchar* remote_path, const gch
   node = mega_session_stat(s, remote_path);
   if (node)
   {
+    file = g_file_new_for_path(local_path);
+    partial_file = get_partial_file_offset(file, &resume_from, err);
+    if (resume_from == -1)
+      return NULL;
+
     if (node->type == MEGA_NODE_FILE)
     {
-      file = g_file_new_for_path(local_path);
-      partial_file = get_partial_file_offset(file, &resume_from);
-      printf("partial_file: %d\n", partial_file);
-      printf("resume_from: %ld bytes\n", resume_from);
-      printf("node file size: %ld bytes\n", node->size);
+      if (node->size == 0)
+        partial_file = FALSE;
+
       if (node->size >= resume_from)
       {
         g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", remote_path);
@@ -3100,9 +3152,17 @@ mega_node* mega_session_put(mega_session* s, const gchar* remote_path, const gch
       node = mega_session_stat(s, tmp);
       if (node)
       {
-        g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", tmp);
-        return NULL;
+        if (node->size == 0)
+          partial_file = FALSE;
+
+        if (node->size >= resume_from)
+        {
+          g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", remote_path);
+          return NULL;
+        }
       }
+      else
+        partial_file = FALSE;
 
       if (!mega_node_is_writable(s, parent_node) || parent_node->type == MEGA_NODE_NETWORK || parent_node->type == MEGA_NODE_CONTACT)
       {
@@ -3161,10 +3221,29 @@ mega_node* mega_session_put(mega_session* s, const gchar* remote_path, const gch
 
   goffset file_size = g_file_info_get_size(info);
 
-  // actual file size (|resume_from|) is on local system
-  // partial file size (|node->size|) is on remote system
   if (partial_file)
+  {
+    gc_array_unref GArray* chunk_bounds = g_array_sized_new(FALSE, FALSE, sizeof(goffset), resume_from / (1024 * 1024));
+    goffset start_chunk = 0, tmp = 0, cb;
+    get_chunk_boundaries(chunk_bounds, resume_from);
+
+    // try to find the closest chunk to start from
+    for (int i = 0; i < chunk_bounds->len; i++)
+    {
+      cb = g_array_index(chunk_bounds, goffset, i);
+      if (cb < node->size)
+        start_chunk = cb;
+      else
+        break;
+    }
+
+    // |resume_from| is actual file size on local system
+    // |node->size| is partial file size on remote system
+    tmp = resume_from;
     file_size = resume_from - node->size;
+    resume_from = start_chunk;
+    file_size = tmp - start_chunk;
+  }
 
   // ask for upload url - [{"a":"u","ssl":0,"ms":0,"s":<SIZE>,"r":0,"e":0}]
   gc_free gchar* up_node = api_call(s, 'o', NULL, &local_err, "[{a:u, ssl:0, ms:0, s:%i, r:0, e:0}]", (gint64)file_size);
@@ -3176,19 +3255,41 @@ mega_node* mega_session_put(mega_session* s, const gchar* remote_path, const gch
 
   gc_free gchar* p_url = s_json_get_member_string(up_node, "p");
 
+  gc_object_unref GFile* partial_tmp = get_partial_temp_file(file);
+  gc_free guchar* aes_key = g_malloc(128);
+  gc_free guchar* nonce = g_malloc(8);
+
+  // read exisitng file for cbc-mac state
+  if (g_file_query_exists(partial_tmp, NULL))
+  {
+    printf("temp file exists\n");
+    read_partial_temp_file(partial_tmp, aes_key, nonce);
+  }
+  else
+  {
+    // write file to save cbc-mac state to allow for resuming partial uploads
+    gc_object_unref GFileOutputStream* gfos = g_file_create(partial_tmp, 0, NULL, err);
+    if (!gfos)
+    {
+      g_propagate_error(err, local_err);
+      return NULL;
+    }
+
+    aes_key = make_random_key();
+    nonce = make_random_key();
+
+    g_output_stream_write(G_OUTPUT_STREAM(gfos), aes_key, 128, NULL, NULL);
+    g_output_stream_write(G_OUTPUT_STREAM(gfos), nonce, 8, NULL, NULL);
+    g_output_stream_close(G_OUTPUT_STREAM(gfos), NULL, NULL);
+  }
+
   // setup encryption
-  gc_free guchar* aes_key = make_random_key();
-  gc_free guchar* nonce = make_random_key();
   AES_set_encrypt_key(aes_key, 128, &data.k);
   memcpy(data.iv, nonce, 8);
   chunked_cbc_mac_init8(&data.mac, aes_key, nonce);
 
   // setup buffer
   data.buffer = buffer = g_byte_array_new();
-
-  // initialize cbc-mac state to resume partial upload
-  if (partial_file)
-    put_process_data(data.buffer, file_size, &data);
 
   // perform upload
   gc_http_free http* h = http_new();
@@ -3263,6 +3364,13 @@ mega_node* mega_session_put(mega_session* s, const gchar* remote_path, const gch
   // add uploaded node to the filesystem
   s->fs_nodes = g_slist_append(s->fs_nodes, nn);
   nn->parent = parent_node;
+
+  // TODO: delete partial_tmp file only on success
+  if (!g_file_delete(partial_tmp, NULL, err))
+  {
+    g_propagate_prefixed_error(err, local_err, "Can't delete temporary partial file: %s", g_file_get_path(partial_tmp));
+    return NULL;
+  }
 
   return nn;
 }
