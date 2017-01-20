@@ -1629,6 +1629,10 @@ static gboolean get_partial_file_offset(GFile* file, goffset* resume_from, GErro
 {
   gc_object_unref GFileInfo* info = g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_SIZE, G_FILE_QUERY_INFO_NONE, NULL, err);
 
+  // if file is not found => no partial file, suppress error
+  if (g_error_matches(*err, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
+    return FALSE;
+
   if (!info)
   {
     *resume_from = -1;
