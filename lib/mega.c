@@ -3306,6 +3306,14 @@ static gboolean partial_get_verify_data(GFile* file, gsize size, struct _get_dat
 
   g_debug("%s", "verifying partial file");
 
+  if (!data->buffer)
+  {
+    g_set_error(&local_err, MEGA_ERROR, MEGA_ERROR_OTHER, "File buffer not properly initialized");
+    g_propagate_error(err, local_err);
+    local_err = NULL;
+    return FALSE;
+  }
+
   // verify partial file before downloading
   partial_stream = g_file_read(file, NULL, &local_err);
   if (!partial_stream)
@@ -3313,9 +3321,6 @@ static gboolean partial_get_verify_data(GFile* file, gsize size, struct _get_dat
     g_propagate_prefixed_error(err, local_err, "Can't read partial file for verifying: ");
     return FALSE;
   }
-
-  if (!(data->buffer))
-    data->buffer = g_byte_array_new();
 
   if (size > data->buffer->len)
   {
@@ -3476,8 +3481,8 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
 
   if (partial_file && !partial_get_verify_data(file, resume_from, &data, err))
   {
-    g_propagate_prefixed_error(err, local_err, "Failed to verify partial file");
-    return FALSE;
+    g_propagate_prefixed_error(err, local_err, "Failed to verify partial file: ");
+    goto err;
   }
 
   // perform download
@@ -3575,6 +3580,14 @@ static gboolean partial_dl_verify_data(GFile* file, gsize size, struct _dl_data*
 
   g_debug("%s", "verifying partial file");
 
+  if (!data->buffer)
+  {
+    g_set_error(&local_err, MEGA_ERROR, MEGA_ERROR_OTHER, "File buffer not properly initialized");
+    g_propagate_error(err, local_err);
+    local_err = NULL;
+    return FALSE;
+  }
+
   // verify partial file before downloading
   partial_stream = g_file_read(file, NULL, &local_err);
   if (!partial_stream)
@@ -3582,9 +3595,6 @@ static gboolean partial_dl_verify_data(GFile* file, gsize size, struct _dl_data*
     g_propagate_prefixed_error(err, local_err, "Can't read partial file for verifying: ");
     return FALSE;
   }
-
-  if (!(data->buffer))
-    data->buffer = g_byte_array_new();
 
   if (size > data->buffer->len)
   {
@@ -3608,7 +3618,6 @@ static gboolean partial_dl_verify_data(GFile* file, gsize size, struct _dl_data*
 
     total_read += bytes_read;
   }
-
 
   if (!g_input_stream_close(G_INPUT_STREAM(partial_stream), NULL, &local_err))
   {
@@ -3813,10 +3822,10 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
   // setup buffer
   data.buffer = buffer = g_byte_array_new();
 
-  if (partial_file && !partial_dl_verify_data(file, resume_from, &data, err))
+  if (partial_file && !partial_dl_verify_data(file, resume_from, &data, &local_err))
   {
-    g_propagate_prefixed_error(err, local_err, "Failed to verify partial file");
-    return FALSE;
+    g_propagate_prefixed_error(err, local_err, "Failed to verify partial file: ");
+    goto err;
   }
 
   // perform download
