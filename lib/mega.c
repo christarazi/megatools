@@ -3461,7 +3461,8 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
   // sanity check partial download conditions
   if (resume_from == file_size)
   {
-    g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", g_file_get_path(file));
+    gc_free gchar* path = g_file_get_path(file);
+    g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", path);
     return FALSE;
   }
   else if (resume_from > file_size)
@@ -3768,7 +3769,8 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
     // sanity check partial download conditions
     if (resume_from == file_size)
     {
-      g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", g_file_get_path(file));
+      gc_free gchar* path = g_file_get_path(file);
+      g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "File already exists: %s", path);
       return FALSE;
     }
     else if (resume_from > file_size)
