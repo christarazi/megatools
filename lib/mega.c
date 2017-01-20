@@ -3256,7 +3256,6 @@ struct _get_data
 {
   mega_session* s;
   GFileOutputStream* stream;
-  GFileInputStream* partial_stream;
   AES_KEY k;
   guchar iv[AES_BLOCK_SIZE];
   gint num;
@@ -3295,8 +3294,9 @@ static gsize get_process_data(gpointer buffer, gsize size, struct _get_data* dat
 }
 
 // megaget; verifies partially downloaded file
-static gboolean partial_get_verify_data(gsize size, struct _get_data* data, GError** err)
+static gboolean partial_get_verify_data(GFile* file, gsize size, struct _get_data* data, GError** err)
 {
+  gc_object_unref GFileInputStream* partial_stream = NULL;
   gc_byte_array_unref GByteArray* buffer = g_byte_array_new();
   gc_error_free GError* local_err = NULL;
   gsize bytes_read = 0;
@@ -3305,6 +3305,14 @@ static gboolean partial_get_verify_data(gsize size, struct _get_data* data, GErr
   goffset offset = 0;
 
   g_debug("%s", "verifying partial file");
+
+  // verify partial file before downloading
+  partial_stream = g_file_read(file, NULL, &local_err);
+  if (!partial_stream)
+  {
+    g_propagate_prefixed_error(err, local_err, "Can't read partial file for verifying: ");
+    return FALSE;
+  }
 
   if (!(data->buffer))
     data->buffer = g_byte_array_new();
@@ -3317,7 +3325,7 @@ static gboolean partial_get_verify_data(gsize size, struct _get_data* data, GErr
 
   while (total_read < size)
   {
-    if (!g_input_stream_read_all(G_INPUT_STREAM(data->partial_stream), buffer->data, CHUNK_SIZE, &bytes_read, NULL, &local_err))
+    if (!g_input_stream_read_all(G_INPUT_STREAM(partial_stream), buffer->data, CHUNK_SIZE, &bytes_read, NULL, &local_err))
     {
       g_printerr("ERROR: Failed reading from stream: %s\n", local_err->message);
       return FALSE;
@@ -3332,9 +3340,9 @@ static gboolean partial_get_verify_data(gsize size, struct _get_data* data, GErr
     total_read += bytes_read;
   }
 
-  if (!g_input_stream_close(G_INPUT_STREAM(data->partial_stream), NULL, &local_err))
+  if (!g_input_stream_close(G_INPUT_STREAM(partial_stream), NULL, &local_err))
   {
-      g_propagate_prefixed_error(err, local_err, "Can't close partial file");
+      g_propagate_prefixed_error(err, local_err, "Can't close partial file: ");
       return FALSE;
   }
 
@@ -3462,19 +3470,10 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
     return FALSE;
   }
 
-  // verify partial file before downloading
-  data.partial_stream = g_file_read(file, NULL, &local_err);
-  if (!data.partial_stream)
-  {
-    g_propagate_prefixed_error(err, local_err, "Can't read partial file for verifying: %s: ", local_path);
-    return FALSE;
-  }
+  // setup buffer
+  data.buffer = buffer = g_byte_array_new();
 
-  // setup buffer if not already
-  if (!data.buffer)
-    data.buffer = buffer = g_byte_array_new();
-
-  if (partial_file && !partial_get_verify_data(resume_from, &data, err))
+  if (partial_file && !partial_get_verify_data(file, resume_from, &data, err))
   {
     g_propagate_prefixed_error(err, local_err, "Failed to verify partial file");
     return FALSE;
@@ -3525,7 +3524,6 @@ struct _dl_data
 {
   mega_session* s;
   GFileOutputStream* stream;
-  GFileInputStream* partial_stream;
   AES_KEY k;
   guchar iv[AES_BLOCK_SIZE];
   gint num;
@@ -3563,9 +3561,10 @@ static gsize dl_process_data(gpointer buffer, gsize size, struct _dl_data* data)
   return size;
 }
 
-// verifies partially downloaded file
-static gboolean partial_dl_verify_data(gsize size, struct _dl_data* data, GError** err)
+// megadl; verifies partially downloaded file
+static gboolean partial_dl_verify_data(GFile* file, gsize size, struct _dl_data* data, GError** err)
 {
+  gc_object_unref GFileInputStream* partial_stream = NULL;
   gc_byte_array_unref GByteArray* buffer = g_byte_array_new();
   gc_error_free GError* local_err = NULL;
   gsize bytes_read = 0;
@@ -3574,6 +3573,14 @@ static gboolean partial_dl_verify_data(gsize size, struct _dl_data* data, GError
   goffset offset = 0;
 
   g_debug("%s", "verifying partial file");
+
+  // verify partial file before downloading
+  partial_stream = g_file_read(file, NULL, &local_err);
+  if (!partial_stream)
+  {
+    g_propagate_prefixed_error(err, local_err, "Can't read partial file for verifying: ");
+    return FALSE;
+  }
 
   if (!(data->buffer))
     data->buffer = g_byte_array_new();
@@ -3586,7 +3593,7 @@ static gboolean partial_dl_verify_data(gsize size, struct _dl_data* data, GError
 
   while (total_read < size)
   {
-    if (!g_input_stream_read_all(G_INPUT_STREAM(data->partial_stream), buffer->data, CHUNK_SIZE, &bytes_read, NULL, &local_err))
+    if (!g_input_stream_read_all(G_INPUT_STREAM(partial_stream), buffer->data, CHUNK_SIZE, &bytes_read, NULL, &local_err))
     {
       g_printerr("ERROR: Failed reading from stream: %s\n", local_err->message);
       return FALSE;
@@ -3602,9 +3609,9 @@ static gboolean partial_dl_verify_data(gsize size, struct _dl_data* data, GError
   }
 
 
-  if (!g_input_stream_close(G_INPUT_STREAM(data->partial_stream), NULL, &local_err))
+  if (!g_input_stream_close(G_INPUT_STREAM(partial_stream), NULL, &local_err))
   {
-      g_propagate_prefixed_error(err, local_err, "Can't close partial file");
+      g_propagate_prefixed_error(err, local_err, "Can't close partial file: ");
       return FALSE;
   }
 
@@ -3801,19 +3808,10 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
   AES_set_encrypt_key(aes_key, 128, &data.k);
   chunked_cbc_mac_init8(&data.mac, aes_key, data.iv);
 
-  // verify partial file before downloading
-  data.partial_stream = g_file_read(file, NULL, &local_err);
-  if (!data.partial_stream)
-  {
-    g_propagate_prefixed_error(err, local_err, "Can't read partial file for verifying: %s: ", local_path);
-    return FALSE;
-  }
+  // setup buffer
+  data.buffer = buffer = g_byte_array_new();
 
-  // setup buffer if not already
-  if (!data.buffer)
-    data.buffer = buffer = g_byte_array_new();
-
-  if (partial_file && !partial_dl_verify_data(resume_from, &data, err))
+  if (partial_file && !partial_dl_verify_data(file, resume_from, &data, err))
   {
     g_propagate_prefixed_error(err, local_err, "Failed to verify partial file");
     return FALSE;
