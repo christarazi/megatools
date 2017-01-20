@@ -393,16 +393,12 @@ gboolean http_get_stream_download(http* h, const gchar* url, http_data_fn write_
 
   http_no_expect(h);
 
-  // first get length of string to allocate memory
-  // source: http://stackoverflow.com/a/32819876/2193236
-  gsize len = snprintf(NULL, 0, "%lu-%lu", resume_from, file_size);
-  range = g_try_malloc(len + 1);
+  range = g_strdup_printf("%lu-%lu", resume_from, file_size);
   if (!range)
   {
     g_set_error(err, HTTP_ERROR, HTTP_ERROR_OTHER, "Memory allocation failed");
     goto out;
   }
-  snprintf(range, len + 1, "%lu-%lu", resume_from, file_size);
 
   // GET request instead of POST
   // setup post headers and url
