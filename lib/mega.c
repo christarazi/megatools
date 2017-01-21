@@ -3322,10 +3322,10 @@ static gboolean partial_get_verify_data(GFile* file, gsize size, struct _get_dat
     return FALSE;
   }
 
-  if (size > data->buffer->len)
+  if (CHUNK_SIZE > data->buffer->len)
   {
-    g_byte_array_set_size(buffer, size);
-    g_byte_array_set_size(data->buffer, size);
+    g_byte_array_set_size(buffer, CHUNK_SIZE);
+    g_byte_array_set_size(data->buffer, CHUNK_SIZE);
   }
 
   while (total_read < size)
@@ -3596,10 +3596,10 @@ static gboolean partial_dl_verify_data(GFile* file, gsize size, struct _dl_data*
     return FALSE;
   }
 
-  if (size > data->buffer->len)
+  if (CHUNK_SIZE > data->buffer->len)
   {
-    g_byte_array_set_size(buffer, size);
-    g_byte_array_set_size(data->buffer, size);
+    g_byte_array_set_size(buffer, CHUNK_SIZE);
+    g_byte_array_set_size(data->buffer, CHUNK_SIZE);
   }
 
   while (total_read < size)
