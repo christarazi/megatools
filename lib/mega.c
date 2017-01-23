@@ -3679,7 +3679,8 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
 
       if (g_file_query_file_type(parent_dir, 0, NULL) != G_FILE_TYPE_DIRECTORY)
       {
-        g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "Can't download file into: %s", g_file_get_path(parent_dir));
+        gc_free gchar* path = g_file_get_path(parent_dir);
+        g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "Can't download file into: %s", path);
         return FALSE;
       }
     }
