@@ -376,7 +376,7 @@ again:
   return res;
 }
 
-gboolean http_get_stream_download(http* h, const gchar* url, http_data_fn write_cb, gpointer user_data, GError** err, gint64 file_size, goffset resume_from)
+gboolean http_get_stream_download(http* h, const gchar* url, http_data_fn write_cb, gpointer user_data, gint64 file_size, goffset resume_from, GError** err)
 {
   struct curl_slist* headers = NULL;
   glong http_status = 0;
@@ -387,9 +387,9 @@ gboolean http_get_stream_download(http* h, const gchar* url, http_data_fn write_
 
   g_return_val_if_fail(h != NULL, FALSE);
   g_return_val_if_fail(url != NULL, FALSE);
-  g_return_val_if_fail(err == NULL || *err == NULL, FALSE);
   g_return_val_if_fail(file_size > 0, FALSE);
   g_return_val_if_fail(resume_from >= 0, FALSE);
+  g_return_val_if_fail(err == NULL || *err == NULL, FALSE);
 
   http_no_expect(h);
 

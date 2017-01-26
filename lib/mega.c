@@ -3505,7 +3505,7 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
   http_set_progress_callback(h, (http_progress_fn)progress_generic, s);
   http_set_speed(h, s->max_ul, s->max_dl);
   http_set_proxy(h, s->proxy);
-  if (!http_get_stream_download(h, url, (http_data_fn)get_process_data, &data, &local_err, file_size, resume_from))
+  if (!http_get_stream_download(h, url, (http_data_fn)get_process_data, &data, file_size, resume_from, &local_err))
   {
     g_propagate_prefixed_error(err, local_err, "Data download failed: ");
     goto err;
@@ -3868,7 +3868,7 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
   http_set_progress_callback(h, (http_progress_fn)progress_generic, s);
   http_set_speed(h, s->max_ul, s->max_dl);
   http_set_proxy(h, s->proxy);
-  if (!http_get_stream_download(h, url, (http_data_fn)dl_process_data, &data, &local_err, file_size, resume_from))
+  if (!http_get_stream_download(h, url, (http_data_fn)dl_process_data, &data, file_size, resume_from, &local_err))
   {
     g_propagate_prefixed_error(err, local_err, "Data download failed: ");
     goto err;
