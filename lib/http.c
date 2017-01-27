@@ -406,7 +406,8 @@ gboolean http_get_stream_download(http* h, const gchar* url, http_data_fn write_
   curl_easy_setopt(h->curl, CURLOPT_URL, url);
 
   // set range to download
-  curl_easy_setopt(h->curl, CURLOPT_RANGE, range);
+  if (resume_from > 0)
+    curl_easy_setopt(h->curl, CURLOPT_RANGE, range);
 
   // setup response writer
   data.cb = write_cb;
