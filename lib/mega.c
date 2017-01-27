@@ -3365,7 +3365,6 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
   gc_free gchar* get_node = NULL, *url = NULL, *orig_fname = NULL;
   gc_http_free http* h = NULL;
   gc_byte_array_unref GByteArray* buffer = NULL;
-  gboolean remove_file = FALSE;
   gboolean partial_file = FALSE;
   goffset resume_from = 0;
 
@@ -3451,8 +3450,6 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
     }
   }
 
-  remove_file = TRUE;
-
   // initialize decrytpion key/state
   guchar aes_key[16], meta_mac_xor[8];
   unpack_node_key(n->key, aes_key, data.iv, meta_mac_xor);
@@ -3484,8 +3481,6 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
   // sanity check partial download conditions
   if (resume_from >= file_size)
   {
-    // do not remove file in case of this error
-    remove_file = FALSE;
     gc_free gchar* path = g_file_get_path(file);
     g_set_error(err, MEGA_ERROR, MEGA_ERROR_OTHER, "Potential overwrite of file with same name: '%s'", path);
     goto err;
@@ -3540,9 +3535,6 @@ gboolean mega_session_get(mega_session* s, const gchar* local_path, const gchar*
   return TRUE;
 
 err:
-  if (file && remove_file)
-    g_file_delete(file, NULL, NULL);
-
   return FALSE;
 }
 
@@ -3663,7 +3655,6 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
   gc_http_free http* h = NULL;
   gc_object_unref GFileOutputStream* stream = NULL;
   gc_byte_array_unref GByteArray* buffer = NULL;
-  gboolean remove_file = FALSE;
   gboolean partial_file = FALSE;
   goffset resume_from = 0;
 
@@ -3848,8 +3839,6 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
     }
   }
 
-  remove_file = TRUE;
-
   // initialize decryption and mac calculation
   AES_set_encrypt_key(aes_key, 128, &data.k);
   chunked_cbc_mac_init8(&data.mac, aes_key, data.iv);
@@ -3903,9 +3892,6 @@ gboolean mega_session_dl(mega_session* s, const gchar* handle, const gchar* key,
   return TRUE;
 
 err:
-  if (file && remove_file)
-      g_file_delete(file, NULL, NULL);
-
   return FALSE;
 }
 
