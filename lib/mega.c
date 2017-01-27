@@ -1631,7 +1631,10 @@ static gboolean get_partial_file_offset(GFile* file, goffset* resume_from, GErro
 
   // if file is not found => no partial file, suppress error
   if (g_error_matches(*err, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
+  {
+    g_clear_error(err);
     return FALSE;
+  }
 
   if (!info)
   {
@@ -3322,7 +3325,7 @@ static gboolean partial_get_verify_data(GFile* file, gsize size, struct _get_dat
     return FALSE;
   }
 
-  if (CHUNK_SIZE > data->buffer->len)
+  if (CHUNK_SIZE > data->buffer->len || CHUNK_SIZE > buffer->len)
   {
     g_byte_array_set_size(buffer, CHUNK_SIZE);
     g_byte_array_set_size(data->buffer, CHUNK_SIZE);
@@ -3611,7 +3614,7 @@ static gboolean partial_dl_verify_data(GFile* file, gsize size, struct _dl_data*
     return FALSE;
   }
 
-  if (CHUNK_SIZE > data->buffer->len)
+  if (CHUNK_SIZE > data->buffer->len || CHUNK_SIZE > buffer->len)
   {
     g_byte_array_set_size(buffer, CHUNK_SIZE);
     g_byte_array_set_size(data->buffer, CHUNK_SIZE);
