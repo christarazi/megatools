@@ -1644,13 +1644,8 @@ static gboolean get_partial_file_offset(GFile* file, goffset* resume_from, GErro
   }
 
   *resume_from = g_file_info_get_size(info);
-  if (*resume_from == 0)
-    return FALSE;
-  else
-  {
-    g_info("partial file detected, size: %lu bytes", *resume_from);
-    return TRUE;
-  }
+  g_info("partial file detected, size: %lu bytes", *resume_from);
+  return TRUE;
 }
 
 // }}}
